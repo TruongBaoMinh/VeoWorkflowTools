@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Binary/Build artifacts - too large for GitHub
+*.zip
+*.asar
+full-release/
+full-resources/
+full-source-app/
+desktop-app/
+desktop-extracted/
+release/
+backups/
+asar-check-*/
+source-extracted-*/
+
+# User data
+user-data/
+data/
