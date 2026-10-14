@@ -23,8 +23,11 @@
     "uuid": "^13.0.0"
   },
   "scripts": {
-    "dev": "bash ./rundev.sh",
+    "dev": "npm run dev:server",
+    "dev:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "dev:server": "npm --prefix apps/server run dev",
+    "dev:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/launch-full-source-dev.ps1",
+    "typecheck": "npm --prefix apps/server run typecheck && npm --prefix apps/renderer run typecheck",
     "dev:renderer": "npm --prefix apps/renderer run dev",
     "dev:electron": "npm --prefix apps/electron run dev",
     "build": "npm run build:all",
