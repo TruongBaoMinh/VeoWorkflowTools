@@ -83,4 +83,18 @@ describe('Manga Story project integration',()=>{
   await store.save('project',config,0);await store.submit('project',{revision:1,sceneIds:[],characterId:'KEIKO',requestId:randomUUID()});await finish();expect(project.jobs[0].prompt).toContain('Exactly five views');
   const preview=await store.preview('project',config);expect(preview.rows[0].prompt).toContain('ONE continuous scene');expect(preview.rows[0].prompt).toContain('Each sheet represents ONE person');
  });
+ it('supports batch generating sample jobs for all characters in a single run',async()=>{
+  await store.save('project',config,0);
+  const request={revision:1,sceneIds:[],characterIds:['KEIKO','YUMI'],requestId:randomUUID()};
+  const run=await store.submit('project',request);
+  await finish();
+  expect(run.characterIds).toEqual(['KEIKO','YUMI']);
+  expect(project.jobs).toHaveLength(2);
+  expect(project.jobs[0].prompt).toContain('Character: Keiko');
+  expect(project.jobs[1].prompt).toContain('Character: Yumi');
+  const job0=project.jobs[0];job0.status='COMPLETED';job0.resultUrl=store.assetPath('project',asset);
+  await store.approve('project',job0.id,'KEIKO');
+  const updated=await store.read('project');
+  expect(updated.config.characters[0].asset).toBe(asset);
+ });
 });

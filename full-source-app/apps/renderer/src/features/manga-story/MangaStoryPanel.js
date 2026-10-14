@@ -391,10 +391,11 @@ function MangaStoryPanel({ projectId, onUpdated }) {
       );
     }, 'Đang đọc file JSON nhân vật…');
 
-  const prepare = async (sceneIds, characterId) =>
+  const prepare = async (sceneIds, characterId, characterIds = null) =>
     act(
       async () => {
-        if (!characterId && !sceneIds.length) throw Error('Chọn ít nhất một cảnh.');
+        const isBatchChars = Array.isArray(characterIds) && characterIds.length > 0;
+        if (!characterId && !isBatchChars && !sceneIds.length) throw Error('Chọn ít nhất một cảnh hoặc nhân vật.');
         if (sceneIds.length > 4 && !verified)
           throw Error(
             'Xác nhận đã kiểm tra nhân vật và ảnh tham chiếu trước khi chuẩn bị hơn 4 cảnh.'
@@ -404,35 +405,69 @@ function MangaStoryPanel({ projectId, onUpdated }) {
         await ye.post(base + '/submit', {
           revision: rev,
           sceneIds,
-          characterId,
+          characterId: characterId || undefined,
+          characterIds: isBatchChars ? characterIds : undefined,
           requestId: request.current,
           verified,
         });
         request.current = null;
-        setMessage('Đã chuẩn bị lượt. Khi trạng thái Sẵn sàng xuất hiện, bấm Chạy lượt này.');
+        if (isBatchChars) {
+          setMessage(
+            'Đã thêm thành công ' +
+              characterIds.length +
+              ' job tạo ảnh mẫu 5 góc cho toàn bộ nhân vật. Khi trạng thái Sẵn sàng xuất hiện, bấm Chạy để bắt đầu tạo ảnh.'
+          );
+        } else if (characterId) {
+          setMessage('Đã thêm job tạo ảnh mẫu 5 góc cho ' + characterId + '. Khi trạng thái Sẵn sàng xuất hiện, bấm Chạy lượt này.');
+        } else {
+          setMessage('Đã chuẩn bị lượt. Khi trạng thái Sẵn sàng xuất hiện, bấm Chạy lượt này.');
+        }
         await reload();
         await onUpdated();
         setTimeout(() => scrollToSection('sec5', sec5Ref), 120);
       },
-      characterId
-        ? 'Đang chuẩn bị lượt tạo ảnh mẫu 5 góc cho ' + characterId + '…'
-        : 'Đang upload tham chiếu và chuẩn bị ' + sceneIds.length + ' cảnh…'
+      Array.isArray(characterIds) && characterIds.length > 0
+        ? 'Đang chuẩn bị thêm ' + characterIds.length + ' job tạo ảnh mẫu cho toàn bộ nhân vật…'
+        : characterId
+          ? 'Đang chuẩn bị lượt tạo ảnh mẫu 5 góc cho ' + characterId + '…'
+          : 'Đang upload tham chiếu và chuẩn bị ' + sceneIds.length + ' cảnh…'
     );
 
-  const approve = (row, run) =>
+  const prepareBatchCharacters = (charIds) => {
+    if (!charIds || !charIds.length) {
+      throw Error('Chưa có nhân vật nào để tạo ảnh mẫu.');
+    }
+    const emptyDesc = cfg.characters.find(
+      (c) => charIds.includes(c.id) && !(c.description || '').trim()
+    );
+    if (emptyDesc) {
+      throw Error(
+        'Nhân vật "' + (emptyDesc.name || emptyDesc.id) + '" chưa có mô tả ngoại hình. Hãy nhập mô tả trước khi tạo ảnh mẫu.'
+      );
+    }
+    return prepare([], null, charIds);
+  };
+
+  const approve = (row, run, charId = null) =>
     act(
       async () => {
         if (dirty) throw Error('Lưu cấu hình trước khi chọn ảnh.');
+        const targetChar =
+          charId ||
+          run.characterId ||
+          (row.sceneId?.startsWith('CHAR_') ? row.sceneId.slice(5) : null);
         await ye.post(base + '/approve', {
           jobId: row.job.id,
-          ...(run.characterId ? { characterId: run.characterId } : {}),
+          ...(targetChar ? { characterId: targetChar } : {}),
         });
-        await reload(!!run.characterId);
+        await reload(!!targetChar);
         setMessage(
-          run.characterId ? 'Đã chọn ảnh chuẩn cho nhân vật.' : 'Đã duyệt và lưu ảnh cảnh vào thư viện.'
+          targetChar
+            ? 'Đã chọn ảnh chuẩn cho nhân vật ' + targetChar + '.'
+            : 'Đã duyệt và lưu ảnh cảnh vào thư viện.'
         );
       },
-      run.characterId ? 'Đang lưu ảnh chuẩn nhân vật…' : 'Đang duyệt và lưu ảnh cảnh…'
+      (charId || run.characterId) ? 'Đang lưu ảnh chuẩn nhân vật…' : 'Đang duyệt và lưu ảnh cảnh…'
     );
 
   const adopt = (row, run) =>
@@ -984,6 +1019,32 @@ function MangaStoryPanel({ projectId, onUpdated }) {
                                   }),
                                 ],
                               }),
+                              cfg.characters.length > 0 && (() => {
+                                const validChars = cfg.characters.filter(
+                                  (c) => (c.id || '').trim() && (c.description || '').trim()
+                                );
+                                const missingChars = validChars.filter((c) => !c.asset);
+                                return e.jsxs('div', {
+                                  style: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+                                  children: [
+                                    validChars.length > 0 &&
+                                      btn(
+                                        '⚡ Thêm job tạo mẫu tất cả nhân vật (' + validChars.length + ')',
+                                        () => prepareBatchCharacters(validChars.map((c) => c.id)),
+                                        active,
+                                        'accent'
+                                      ),
+                                    missingChars.length > 0 &&
+                                    missingChars.length < validChars.length &&
+                                      btn(
+                                        '⚡ Tạo mẫu nhân vật chưa có ảnh (' + missingChars.length + ')',
+                                        () => prepareBatchCharacters(missingChars.map((c) => c.id)),
+                                        active,
+                                        'primary'
+                                      ),
+                                  ],
+                                });
+                              })(),
                               cfg.characters.length > 2 &&
                                 btn(
                                   Object.keys(collapsedChars).length >= cfg.characters.length
@@ -1032,8 +1093,15 @@ function MangaStoryPanel({ projectId, onUpdated }) {
                           const isCollapsed = !!collapsedChars[index] && !query;
                           const latestCharRun = [...(ctx?.runs || [])]
                             .reverse()
-                            .find((r) => r.characterId && r.characterId === c.id);
-                          const latestCharRow = latestCharRun?.rows?.[0];
+                            .find(
+                              (r) =>
+                                (r.characterId && r.characterId === c.id) ||
+                                (Array.isArray(r.characterIds) && r.characterIds.includes(c.id)) ||
+                                r.rows?.some((row) => row.sceneId === 'CHAR_' + c.id)
+                            );
+                          const latestCharRow =
+                            latestCharRun?.rows?.find((row) => row.sceneId === 'CHAR_' + c.id) ||
+                            latestCharRun?.rows?.[0];
 
                           return e.jsxs(
                             'div',
@@ -1279,7 +1347,7 @@ function MangaStoryPanel({ projectId, onUpdated }) {
                                               latestCharRow?.job?.status === 'COMPLETED' &&
                                                 btn(
                                                   'Dùng mẫu vừa tạo',
-                                                  () => approve(latestCharRow, latestCharRun),
+                                                  () => approve(latestCharRow, latestCharRun, c.id),
                                                   active,
                                                   'primary'
                                                 ),

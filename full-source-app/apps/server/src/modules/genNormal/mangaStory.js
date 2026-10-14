@@ -86,10 +86,11 @@ export class MangaStoryStore {
             if(!state.runs?.length)continue;
             const project=await this.project(summary.id);
             for(const run of state.runs){
-                const snapshot=run.characterId?run.config?.characters?.find(c=>c.id===run.characterId):null;
+                const isCharRun = !!(run.characterId || (Array.isArray(run.characterIds) && run.characterIds.length));
+                const snapshot=isCharRun?run.config?.characters?.find(c=>c.id===run.characterId||run.characterIds?.includes(c.id)):null;
                 const canonical=snapshot?.name||run.characterId;
-                const target=run.characterId?current.config.characters.find(c=>c.id===run.characterId)||current.config.characters.find(c=>c.id===canonical)||current.config.characters.find(c=>c.name===canonical):null;
-                runs.push({id:run.id,requestId:run.requestId,characterId:run.characterId,status:run.status,error:run.error,createdAt:run.createdAt,sourceProjectId:summary.id,sourceProjectName:summary.name||summary.id,targetCharacterId:target?.id||null,rows:run.rows.map(row=>{const job=project.jobs.find(j=>j.prompt===row.prompt);return {...row,job:job?{id:job.id,status:job.status,resultUrl:job.resultUrl,error:job.error}:null};})});
+                const target=isCharRun?current.config.characters.find(c=>c.id===run.characterId||run.characterIds?.includes(c.id))||current.config.characters.find(c=>c.id===canonical)||current.config.characters.find(c=>c.name===canonical):null;
+                runs.push({id:run.id,requestId:run.requestId,characterId:run.characterId,characterIds:run.characterIds,status:run.status,error:run.error,createdAt:run.createdAt,sourceProjectId:summary.id,sourceProjectName:summary.name||summary.id,targetCharacterId:target?.id||null,rows:run.rows.map(row=>{const job=project.jobs.find(j=>j.prompt===row.prompt);return {...row,job:job?{id:job.id,status:job.status,resultUrl:job.resultUrl,error:job.error}:null};})});
             }
         }
         runs.sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
@@ -102,32 +103,38 @@ export class MangaStoryStore {
             const sourceState=await this.read(sourceProjectId),sourceProject=await this.project(sourceProjectId);
             const run=sourceState.runs.find(r=>r.rows.some(row=>sourceProject.jobs.some(j=>j.id===jobId&&j.prompt===row.prompt)));
             const job=sourceProject.jobs.find(j=>j.id===jobId);
-            if(!run||!run.characterId||job?.status!=='COMPLETED'||!job.resultUrl)throw Error('Ảnh nguồn chưa hoàn thành hoặc không thuộc lượt nhân vật.');
+            const isCharRun = !!(run?.characterId || (Array.isArray(run?.characterIds)&&run.characterIds.length) || run?.rows?.some(r=>r.sceneId.startsWith('CHAR_')));
+            if(!run||!isCharRun||job?.status!=='COMPLETED'||!job.resultUrl)throw Error('Ảnh nguồn chưa hoàn thành hoặc không thuộc lượt nhân vật.');
             const dest=path.join(this.dir(id),'approved',randomUUID()+'.png');await mkdir(path.dirname(dest),{recursive:true});
             if(/^(https?:\/\/|file:\/\/)/.test(job.resultUrl))await this.download(job.resultUrl,dest);else await copyFile(job.resultUrl,dest);
             const {asset}=await this.importAsset(id,dest);target.asset=asset;state.revision++;await this.write(id,state);return {asset,revision:state.revision,targetCharacterId};
         });
     }
-    async submit(id,{revision,sceneIds,requestId,characterId,verified=false}) {
+    async submit(id,{revision,sceneIds=[],requestId,characterId=null,characterIds=null,verified=false}) {
         return this.exclusive(id,async()=>{
             const state=await this.read(id);const old=state.runs.find(r=>r.requestId===requestId);if(old)return old;
             if(state.revision!==revision)throw Error('Lưu và kiểm tra cấu hình mới nhất trước khi tạo.');
             const project=await this.project(id);if(!project.profiles.length)throw Error('Chọn profile cho project trong Gen trước.');
             if(this.tasks.has(id))throw Error('Lượt trước đang chuẩn bị.');
-            if(!characterId&&sceneIds.length>4&&!verified)throw Error('Xác nhận đã kiểm tra nhân vật và ảnh tham chiếu trước khi chuẩn bị hơn 4 cảnh.');
+            const targetCharIds = Array.isArray(characterIds) && characterIds.length ? characterIds : (characterId ? [characterId] : []);
+            if(!targetCharIds.length&&sceneIds.length>4&&!verified)throw Error('Xác nhận đã kiểm tra nhân vật và ảnh tham chiếu trước khi chuẩn bị hơn 4 cảnh.');
             if(project.jobs.some(j=>['PROCESSING','QUEUED'].includes(j.status)))throw Error('Chờ hoặc dừng lượt Gen đang chạy trước khi thêm bộ ảnh.');
             let rows;
-            if(characterId){
-                const c=state.config.characters.find(c=>c.id===characterId);if(!c?.description.trim())throw Error('Nhập mô tả nhân vật trước.');
-                const images=[];if(c.asset)images.push({path:this.assetPath(id,c.asset),role:'character'});if(state.config.styleAsset)images.push({path:this.assetPath(id,state.config.styleAsset),role:'style'});
-                if(images.length>state.config.maxReferences)throw Error('Vượt số ảnh tham chiếu đã chọn.');
-                rows=[{scene:{scene_id:'CHAR_'+c.id},images,prompt:buildCharacterSheetPrompt(c,state.config.style,project.aspectRatio,!!state.config.styleAsset)}];
+            if(targetCharIds.length){
+                rows = targetCharIds.map(charId => {
+                    const c=state.config.characters.find(item=>item.id===charId);
+                    if(!c) throw Error(`Không tìm thấy nhân vật ${charId}.`);
+                    if(!c?.description.trim())throw Error(`Nhập mô tả cho nhân vật ${c.name||c.id} trước.`);
+                    const images=[];if(c.asset)images.push({path:this.assetPath(id,c.asset),role:'character'});if(state.config.styleAsset)images.push({path:this.assetPath(id,state.config.styleAsset),role:'style'});
+                    if(images.length>state.config.maxReferences)throw Error(`Nhân vật ${c.name||c.id} vượt số ảnh tham chiếu đã chọn.`);
+                    return {scene:{scene_id:'CHAR_'+c.id},images,prompt:buildCharacterSheetPrompt(c,state.config.style,project.aspectRatio,!!state.config.styleAsset)};
+                });
             }else{
                 const preview=await this.preview(id,state.config);rows=preview.rows.filter(r=>sceneIds.includes(r.scene.scene_id));
                 if(!rows.length||rows.length!==sceneIds.length||rows.some(r=>!r.ready||r.error))throw Error('Cảnh được chọn thiếu ảnh hoặc không hợp lệ. Kiểm tra lại trước.');
             }
             for(const row of rows)for(const img of row.images)await stat(img.path);
-            const runId=randomUUID();const run={id:runId,requestId,characterId:characterId||null,status:'PREPARING',createdAt:new Date().toISOString(),config:structuredClone(state.config),model:project.imageModelKey||'GEM_PIX_2',profileIds:project.profiles.map(p=>p.profileId),aspectRatio:project.aspectRatio,rows:rows.map(r=>({sceneId:r.scene.scene_id,prompt:`Manga run ${runId} / ${r.scene.scene_id}. Do not render this identifier as text.\n${r.prompt}`,images:r.images}))};
+            const runId=randomUUID();const run={id:runId,requestId,characterId:targetCharIds.length===1?targetCharIds[0]:null,characterIds:targetCharIds.length>0?targetCharIds:undefined,status:'PREPARING',createdAt:new Date().toISOString(),config:structuredClone(state.config),model:project.imageModelKey||'GEM_PIX_2',profileIds:project.profiles.map(p=>p.profileId),aspectRatio:project.aspectRatio,rows:rows.map(r=>({sceneId:r.scene.scene_id,prompt:`Manga run ${runId} / ${r.scene.scene_id}. Do not render this identifier as text.\n${r.prompt}`,images:r.images}))};
             state.runs.push(run);await this.write(id,state);
             // Keep lock across uploads and submission; return promptly to the UI.
             this.tasks.add(id);
@@ -159,7 +166,8 @@ export class MangaStoryStore {
             const row=run.rows.find(r=>r.prompt===job.prompt);
             let characterTarget=null;
             if(characterId){
-                if(run.characterId!==characterId)throw Error('Ảnh không thuộc nhân vật được chọn.');
+                const isCharMatch = run.characterId===characterId || (Array.isArray(run.characterIds)&&run.characterIds.includes(characterId)) || row?.sceneId==='CHAR_'+characterId;
+                if(!isCharMatch)throw Error('Ảnh không thuộc nhân vật được chọn.');
                 characterTarget=state.config.characters.find(c=>c.id===characterId);
                 if(!characterTarget){
                     const snapshot=run.config?.characters?.find(c=>c.id===characterId);
