@@ -108,15 +108,33 @@ function splitSourceText(text,count){
     return parts;
 }
 
+function clauseCandidateStarts(utteranceSentences){
+    const out=[];
+    for(const s of utteranceSentences){
+        const text=oneLine(s.sentence),dur=(s.end_ms??0)-(s.start_ms??0);
+        if(!text||dur<=0)continue;
+        for(const match of text.matchAll(/[,;:!?。！？、，；：.]\s*/g)){
+            const idx=match.index+match[0].length;
+            if(idx>0&&idx<text.length)out.push(Math.round(s.start_ms+dur*(idx/text.length)));
+        }
+    }
+    return out;
+}
+
 function splitLongUtterance(item,sentences,cueStarts,config){
     const duration=item.end_ms-item.start_ms;
     if(duration<=config.maxDurationMs)return [{item,start_ms:item.start_ms,end_ms:item.end_ms,source_text:oneLine(item.text),scene_id:item.utterance_id,split:false}];
-    const sentenceStarts=sentences.filter(sentence=>sentence.utterance_id===item.utterance_id).map(sentence=>sentence.start_ms);
-    const candidates=[...new Set([...sentenceStarts,...cueStarts])].filter(value=>Number.isInteger(value)&&value>item.start_ms&&value<item.end_ms).sort((a,b)=>a-b);
+    const uttSentences=sentences.filter(sentence=>sentence.utterance_id===item.utterance_id);
+    const sentenceStarts=uttSentences.map(sentence=>sentence.start_ms);
+    const baseCandidates=[...new Set([...sentenceStarts,...cueStarts])].filter(value=>Number.isInteger(value)&&value>item.start_ms&&value<item.end_ms).sort((a,b)=>a-b);
+    const allCandidates=[...new Set([...baseCandidates,...clauseCandidateStarts(uttSentences)])].filter(value=>Number.isInteger(value)&&value>item.start_ms&&value<item.end_ms).sort((a,b)=>a-b);
     const cuts=[];let start=item.start_ms;
     while(item.end_ms-start>config.maxDurationMs){
         const remaining=item.end_ms-start,parts=Math.ceil(remaining/config.maxDurationMs),target=start+remaining/parts;
-        const valid=candidates.filter(value=>value>=start+config.minDurationMs&&value<=Math.min(start+config.maxDurationMs,item.end_ms-config.minDurationMs));
+        const minCut=start+config.minDurationMs,maxCut=Math.min(start+config.maxDurationMs,item.end_ms-config.minDurationMs);
+        let valid=baseCandidates.filter(value=>value>=minCut&&value<=maxCut);
+        if(!valid.length)valid=allCandidates.filter(value=>value>=minCut&&value<=maxCut);
+        if(!valid.length)valid=allCandidates.filter(value=>value>=minCut&&value<=item.end_ms-config.minDurationMs);
         if(!valid.length)break;
         const cut=valid.sort((a,b)=>Math.abs(a-target)-Math.abs(b-target))[0];cuts.push(cut);start=cut;
     }

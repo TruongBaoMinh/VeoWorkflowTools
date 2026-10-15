@@ -72,6 +72,14 @@ describe('Story data export',()=>{
   expect(timeline.scenes.map(scene=>[scene.scene_id,scene.start_ms,scene.end_ms])).toEqual([['UT001_A',0,5500],['UT001_B',5500,11000]]);
   expect(timeline.scenes.map(scene=>scene.source_text)).toEqual(['Tình thương cần được gửi đúng lúc,','và người nhận cần có quyền lựa chọn.']);
  });
+ it('falls back to sentence clause boundaries when SRT cues are longer than maxDurationMs',()=>{
+  const text='四十年間、自分の思いどおりに動いてくれた妻が自分の時間を持つと、ご主人は最初、不機嫌になったり、ため息をついたりするでしょう。';
+  const rows=[{utterance_id:'UT001',speaker_id:'RINKO',speech_type:'DIALOGUE',text,audio_tags:[],start_ms:0,end_ms:14000,alignment_confidence:1}];
+  const sentences=[{utterance_id:'UT001',sentence:text,start_ms:0,end_ms:14000}];
+  const timeline=buildVisualTimeline(rows,'C:/audio/master.mp3',14000,{minDurationMs:2500,maxDurationMs:9000,maxUtterances:3,sentences,srtCueStarts:[0]});
+  expect(timeline.scenes).toHaveLength(2);
+  expect(timeline.scenes.every(s=>s.duration_ms<=9000&&!s.review_required)).toBe(true);
+ });
  it('rejects duplicate, missing and malformed utterance ids',()=>{
   expect(()=>parseControlScript('[UT001][MAI][DIALOGUE]\nA\n\n[UT001][MAI][DIALOGUE]\nB')).toThrow(/Trùng|liên tục/);
   expect(()=>parseControlScript('[UT002][MAI][DIALOGUE]\nA')).toThrow(/liên tục/);

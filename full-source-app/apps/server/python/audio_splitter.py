@@ -40,7 +40,7 @@ def dense(ch):
 
 
 def tokenize(text):
-    text = html.unescape(re.sub(r'<[^>]+>|\{[^}]*\}', '', text)).casefold()
+    text = html.unescape(re.sub(r'<[^>]+>|\{[^}]*\}|\[[^\]]*\]', '', text)).casefold()
     for mark in ('’', '‘', 'ʼ', 'ʻ', '＇', '`', '´'):
         text = text.replace(mark, "'")
     text = unicodedata.normalize('NFKD', text.replace('đ', 'd').replace('ð', 'd'))
@@ -205,7 +205,7 @@ def global_ranges(sentences, words):
 
 def find_range(target, tokens, cursor):
     n = len(target)
-    for pos in range(cursor, min(len(tokens), cursor + 180)):
+    for pos in range(cursor, min(len(tokens), cursor + max(180, n * 2 + 80))):
         if tokens[pos:pos + n] == target: return pos, pos + n - 1, 'exact_contiguous', 1.0
     end = min(len(tokens), cursor + max(220, n * 5 + 80))
     first = set(target[:min(4, n)])
@@ -229,7 +229,7 @@ def find_range(target, tokens, cursor):
 
 def normal_match(target, tokens, cursor, anchor=None):
     if not target or cursor >= len(tokens): return None
-    last = min(len(tokens) - 1, cursor + max(18, min(72, len(target) * 3 + 14)))
+    last = min(len(tokens) - 1, cursor + max(72, len(target) * 3 + 32))
     result = find_range(target, tokens, cursor)
     if result and cursor <= result[0] <= last and result[1] <= last and (result[2] == 'exact_contiguous' or result[3] >= .72): return result
     if anchor and cursor <= anchor[0] <= last and anchor[1] <= last and anchor[3] >= .78: return anchor
