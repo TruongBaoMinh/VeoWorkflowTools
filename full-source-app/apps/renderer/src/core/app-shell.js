@@ -14948,9 +14948,14 @@ function Zk({
   const w = () => {
       const j = !x;
       b(j),
-        window.electronAPI?.setAutoWarmupEnabled?.(j).catch(() => {
-          b(!j);
-        });
+        window.electronAPI
+          ?.setAutoWarmupEnabled?.(j)
+          .then(() => {
+            j && ye.post("/api/profiles/refresh-all-tokens", {}).catch(() => {});
+          })
+          .catch(() => {
+            b(!j);
+          });
     },
     N = (j) => {
       if (j === p) return;
@@ -23331,10 +23336,13 @@ function Gx() {
         b.current.add(M), p(M, !0);
         try {
           const S = await ma.refreshAccountInfo(M);
-          v([S]);
+          return v([S]), S;
         } catch (S) {
-          console.error("[useProfiles] refreshAccountInfo failed:", S),
-            m((_) => ({ ..._, [M]: "NETWORK" }));
+          return (
+            console.error("[useProfiles] refreshAccountInfo failed:", S),
+            m((_) => ({ ..._, [M]: "NETWORK" })),
+            null
+          );
         } finally {
           b.current.delete(M), p(M, !1);
         }
@@ -24705,23 +24713,63 @@ function iS({
                                 ],
                               }),
               J &&
-                e.jsxs("div", {
-                  className:
-                    "mt-1 flex items-center gap-1.5 text-[10px] text-slate-400",
-                  children: [
-                    e.jsx("span", { "aria-hidden": "true", children: "🔑" }),
-                    e.jsxs("span", {
+                (P
+                  ? e.jsxs("div", {
+                      className:
+                        "mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200",
                       children: [
-                        "Token",
-                        P ? " (đã hết hạn – tự gia hạn khi dùng)" : " hết hạn",
+                        e.jsxs("div", {
+                          className: "flex items-center gap-1.5 min-w-0",
+                          children: [
+                            e.jsx("span", {
+                              "aria-hidden": "true",
+                              children: "🔑",
+                            }),
+                            e.jsxs("span", {
+                              className: "truncate font-medium",
+                              children: ["Token 24h đã hết hạn (", J, ")"],
+                            }),
+                          ],
+                        }),
+                        e.jsx("button", {
+                          type: "button",
+                          onClick: () => b(t.id),
+                          disabled: r || c,
+                          className:
+                            "flex-shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-amber-700 disabled:opacity-50",
+                          children:
+                            c || r ? "Đang cấp lại..." : "⚡ Cấp lại Token",
+                        }),
                       ],
-                    }),
-                    e.jsx("span", {
-                      className: "ml-auto tabular-nums",
-                      children: J,
-                    }),
-                  ],
-                }),
+                    })
+                  : (() => {
+                      const Y = Math.max(0, z.getTime() - w),
+                        F = Math.floor(Y / 36e5),
+                        W = Math.max(1, Math.round((Y % 36e5) / 6e4)),
+                        $ = F > 0 ? `còn ${F}g ${W}p` : `còn ${W} phút`,
+                        G = Y <= 2 * 36e5;
+                      return e.jsxs("div", {
+                        className: `mt-1 flex items-center gap-1.5 text-[11px] ${G ? "text-amber-600 dark:text-amber-300 font-medium" : "text-slate-500 dark:text-slate-400"}`,
+                        children: [
+                          e.jsx("span", {
+                            "aria-hidden": "true",
+                            children: "🔑",
+                          }),
+                          e.jsxs("span", {
+                            children: [
+                              "Access Token ",
+                              G ? "sắp hết hạn · " : "hợp lệ · ",
+                              $,
+                            ],
+                          }),
+                          e.jsxs("span", {
+                            className:
+                              "ml-auto tabular-nums text-[10px] text-slate-400",
+                            children: ["(hạn ", J, ")"],
+                          }),
+                        ],
+                      });
+                    })()),
             ],
           }),
           t.notes &&
@@ -24747,7 +24795,7 @@ function iS({
               rawError: l.rawError,
               autoFocusRetry: !1,
               onRetry: () => {
-                p(t.id), m(t);
+                p(t.id), m(t, !0);
               },
               onDismiss: () => p(t.id),
             }),
@@ -24756,7 +24804,8 @@ function iS({
             children: [
               window.electronAPI &&
                 e.jsx("button", {
-                  onClick: () => m(t),
+                  onClick: () =>
+                    m(t, P || j || s === "UNAUTHORIZED" || s === "NO_COOKIES"),
                   className:
                     "flex items-center justify-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100",
                   title:
@@ -24915,6 +24964,7 @@ function nw() {
     [T, M] = u.useState(null),
     [S, _] = u.useState(null),
     [L, z] = u.useState(null),
+    [B, D] = u.useState(!1),
     { setHeaderContent: P } = ms(),
     { warmingProfileIds: J, warmupErrors: Y, clearWarmupError: F } = p0(),
     W = u.useRef(null),
@@ -24982,20 +25032,75 @@ function nw() {
           z({ code: ue, rawError: H.error, profileId: X.id });
           return;
         }
-        x(X.id);
+        O &&
+          (await ye
+            .post("/api/profiles/warmup-single", {
+              profileId: X.id,
+              force: !0,
+            })
+            .catch(() => {})),
+          x(X.id);
       } catch (H) {
         const ae = H instanceof Error ? H.message : String(H);
         z({ code: Ad(ae), rawError: ae, profileId: X.id });
       }
     },
-    q = async (X) => {
-      _(X);
+    q = u.useCallback(
+      async (X) => {
+        _(X), z(null);
+        try {
+          const O = await x(X),
+            H = O?.accessTokenExpires
+              ? new Date(O.accessTokenExpires).getTime()
+              : 0,
+            ue = !H || H <= Date.now() || O?.errorCode === "UNAUTHORIZED";
+          if (ue && window.electronAPI?.profileOpenBrowserForLogin) {
+            window.electronAPI.setAutoWarmupEnabled?.(!0).catch(() => {});
+            const ae = await window.electronAPI.profileOpenBrowserForLogin(X);
+            if (!ae?.success) {
+              const ie =
+                ae?.errorCode ?? Ad(ae?.error ?? "Không thể cấp lại phiên");
+              z({
+                code: ie,
+                rawError: ae?.error ?? "Không thể cấp lại phiên",
+                profileId: X,
+              });
+              return;
+            }
+            await window.electronAPI.profileCloseRealChrome?.(X).catch(() => {}),
+              await ye
+                .post("/api/profiles/warmup-single", {
+                  profileId: X,
+                  force: !0,
+                })
+                .catch(() => {}),
+              await x(X);
+          }
+        } finally {
+          _(null);
+        }
+      },
+      [x],
+    ),
+    K = u.useMemo(
+      () =>
+        t.filter(
+          (X) =>
+            X.isActive !== !1 &&
+            (!X.accessTokenExpires ||
+              new Date(X.accessTokenExpires).getTime() <= Date.now()),
+        ),
+      [t],
+    ),
+    Q = u.useCallback(async () => {
+      if (B || K.length === 0) return;
+      D(!0);
       try {
-        await x(X);
+        for (const X of K) await q(X.id);
       } finally {
-        _(null);
+        D(!1);
       }
-    };
+    }, [B, K, q]);
   return (
     u.useEffect(() => {
       b();
@@ -25004,7 +25109,7 @@ function nw() {
       () => (
         P(
           e.jsxs("div", {
-            className: "flex items-center justify-between w-full",
+            className: "flex items-center justify-between w-full gap-3",
             children: [
               e.jsxs("div", {
                 children: [
@@ -25014,22 +25119,49 @@ function nw() {
                   }),
                   e.jsx("p", {
                     className: "text-xs text-slate-500",
-                    children: "Quản lý tài khoản veo3 Ultra",
+                    children:
+                      "Quản lý tài khoản Veo3 Ultra · Access Token có hạn ~24h và tự cấp lại từ phiên Google",
                   }),
                 ],
               }),
-              e.jsxs("button", {
-                onClick: $,
-                className:
-                  "flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 shadow-sm",
-                children: [e.jsx(Ii, { className: "h-4 w-4" }), "Thêm profile"],
+              e.jsxs("div", {
+                className: "flex items-center gap-2",
+                children: [
+                  K.length > 0 &&
+                    e.jsxs("button", {
+                      type: "button",
+                      onClick: Q,
+                      disabled: B || S !== null,
+                      className:
+                        "flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 shadow-sm",
+                      title:
+                        "Tự động mở nhanh Chrome để cấp lại Access Token 24h mới cho các profile đã hết hạn",
+                      children: [
+                        e.jsx(Fe, {
+                          className: `h-3.5 w-3.5 ${B ? "animate-spin" : ""}`,
+                        }),
+                        B
+                          ? "Đang cấp lại Token..."
+                          : `⚡ Cấp lại Token hết hạn (${K.length})`,
+                      ],
+                    }),
+                  e.jsxs("button", {
+                    onClick: $,
+                    className:
+                      "flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 shadow-sm",
+                    children: [
+                      e.jsx(Ii, { className: "h-4 w-4" }),
+                      "Thêm profile",
+                    ],
+                  }),
+                ],
               }),
             ],
           }),
         ),
         () => P(null)
       ),
-      [P, $],
+      [P, $, K.length, B, S, Q],
     ),
     s && t.length === 0
       ? e.jsx("div", {
@@ -43147,7 +43279,8 @@ function v6({ onNavigateToProfiles: t }) {
         A?.(), T?.();
       };
     }, []);
-  const w = (A) => {
+  const [B, D] = u.useState(() => new Set()),
+    w = (A) => {
       o((T) => new Set(T).add(A)), r((T) => T.filter((M) => M.profileId !== A));
     },
     N = () => {
@@ -43159,7 +43292,31 @@ function v6({ onNavigateToProfiles: t }) {
         r([]);
     },
     C = (A) => {
-      t && t();
+      A && w(A), t && t();
+    },
+    E = async (A) => {
+      if (!A || B.has(A)) return;
+      D((T) => new Set(T).add(A));
+      try {
+        window.electronAPI?.setAutoWarmupEnabled?.(!0).catch(() => {});
+        if (window.electronAPI?.profileOpenBrowserForLogin) {
+          const T = await window.electronAPI.profileOpenBrowserForLogin(A);
+          if (T?.success) {
+            await window.electronAPI.profileCloseRealChrome?.(A).catch(() => {});
+            await ye
+              .post("/api/profiles/warmup-single", { profileId: A, force: !0 })
+              .catch(() => {});
+            w(A);
+            return;
+          }
+        }
+        C(A);
+      } finally {
+        D((T) => {
+          const M = new Set(T);
+          return M.delete(A), M;
+        });
+      }
     };
   if (s.length === 0) return null;
   const k = s.filter((A) => A.type === "needs-auth"),
@@ -43303,20 +43460,36 @@ function v6({ onNavigateToProfiles: t }) {
                     e.jsx("p", {
                       className:
                         "text-sm font-medium text-amber-800 dark:text-amber-200",
-                      children: "Profile cần đăng nhập lại",
+                      children: "Access Token 24h cần cấp lại",
                     }),
                     e.jsx("p", {
                       className:
                         "text-sm text-amber-600 dark:text-amber-300 mt-1 truncate",
                       children: A.profileName,
                     }),
-                    e.jsxs("button", {
-                      onClick: () => C(A.profileId),
-                      className:
-                        "mt-2 text-xs text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 underline flex items-center gap-1",
+                    e.jsxs("div", {
+                      className: "mt-2 flex flex-wrap items-center gap-2",
                       children: [
-                        e.jsx(Fe, { className: "h-3 w-3" }),
-                        "Đi đến Profiles để đăng nhập lại",
+                        e.jsxs("button", {
+                          onClick: () => E(A.profileId),
+                          disabled: B.has(A.profileId),
+                          className:
+                            "rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1",
+                          children: [
+                            e.jsx(Fe, {
+                              className: `h-3 w-3 ${B.has(A.profileId) ? "animate-spin" : ""}`,
+                            }),
+                            B.has(A.profileId)
+                              ? "Đang tự cấp lại..."
+                              : "⚡ Tự cấp lại Token ngay",
+                          ],
+                        }),
+                        e.jsx("button", {
+                          onClick: () => C(A.profileId),
+                          className:
+                            "text-xs text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 underline",
+                          children: "Đi đến Profiles",
+                        }),
                       ],
                     }),
                   ],

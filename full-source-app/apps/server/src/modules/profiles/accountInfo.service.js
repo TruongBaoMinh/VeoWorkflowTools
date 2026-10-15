@@ -7,6 +7,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { Veo3Service } from '../../services/veo3/veo3Service.js';
 import { cookieTokenService } from '../../lib/cookieTokenService.js';
+import { requestProfileRemint } from '../../lib/sessionRemintRequest.js';
 import { refreshAccessTokenFromCookies } from '../../providers/utils/cookieAuth.js';
 import { getProfileCookiesCompat } from '../../utils/profileCookies.js';
 import { readSessionCookie } from './sessionCookie.js';
@@ -14,6 +15,7 @@ import { logger } from '../../lib/logger.js';
 const SEMAPHORE_WIDTH = 3;
 const STAGGER_MS = 400;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LEAD_MS = 10 * 60 * 1000;
 /**
  * Error text that genuinely means "this session is no longer accepted".
  * Matched case-insensitively. Deliberately narrow: the previous `hết hạn`
@@ -122,7 +124,12 @@ export async function refreshProfileAccountInfo(profileId, opts = {}) {
                 sessionScopedOnly: false,
             };
         }
-        if (!opts.force && profile.creditsUpdatedAt) {
+        const storedTokenExpiresMs = profile.accessTokenExpires
+            ? new Date(profile.accessTokenExpires).getTime()
+            : NaN;
+        const isTokenExpiredOrSoon = !Number.isFinite(storedTokenExpiresMs) ||
+            storedTokenExpiresMs <= Date.now() + TOKEN_REFRESH_LEAD_MS;
+        if (!opts.force && !isTokenExpiredOrSoon && profile.creditsUpdatedAt) {
             const ageMs = Date.now() - new Date(profile.creditsUpdatedAt).getTime();
             if (ageMs < CACHE_TTL_MS) {
                 logger.debug(`[AccountInfo] cache hit ${profileId.substring(0, 8)}: age=${Math.round(ageMs / 1000)}s ` +
@@ -156,7 +163,9 @@ export async function refreshProfileAccountInfo(profileId, opts = {}) {
         let accessToken = profile.accessToken ?? undefined;
         let accessTokenExpires = profile.accessTokenExpires ?? null;
         try {
-            const tok = await refreshAccessTokenFromCookies(cookies, profileId, { force: opts.force === true });
+            const tok = await refreshAccessTokenFromCookies(cookies, profileId, {
+                force: Boolean(opts.force || isTokenExpiredOrSoon),
+            });
             accessToken = tok.accessToken;
             accessTokenExpires = tok.expiresAt ?? accessTokenExpires;
             await prisma.profile
@@ -166,7 +175,10 @@ export async function refreshProfileAccountInfo(profileId, opts = {}) {
             })
                 .catch(() => { });
         }
-        catch {
+        catch (tokenErr) {
+            if (tokenErr?.code === 'FLOW_SESSION_REMINT_REQUIRED' && opts.force) {
+                requestProfileRemint(profileId, 'manual-refresh', { force: true });
+            }
             // Cookies expired / labs session missing → getCredits below will 401 and
             // surface UNAUTHORIZED with the cached values intact.
         }

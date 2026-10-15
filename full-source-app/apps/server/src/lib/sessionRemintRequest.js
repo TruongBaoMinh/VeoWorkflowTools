@@ -10,9 +10,9 @@ import { fetchIpcBridge } from './ipcBridgeFetch.js';
 import { logger } from './logger.js';
 const REQUEST_COOLDOWN_MS = 5 * 60000;
 const lastRequestAt = new Map();
-export function requestProfileRemint(profileId, reason) {
+export function requestProfileRemint(profileId, reason, opts = {}) {
     const now = Date.now();
-    if (now - (lastRequestAt.get(profileId) ?? 0) < REQUEST_COOLDOWN_MS)
+    if (!opts.force && now - (lastRequestAt.get(profileId) ?? 0) < REQUEST_COOLDOWN_MS)
         return;
     // Drop entries that are past their cooldown so a long-running server with many
     // profiles does not accumulate them for the life of the process.
@@ -26,10 +26,16 @@ export function requestProfileRemint(profileId, reason) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
     })
-        .then((res) => {
-        logger.info(`[SessionRemint] requested re-mint for ${profileId.substring(0, 8)} (${reason}) → ${res.status}`);
+        .then(async (res) => {
+        const payload = await res.json().catch(() => ({}));
+        if (payload && payload.accepted === false) {
+            lastRequestAt.delete(profileId);
+        }
+        logger.info(`[SessionRemint] requested re-mint for ${profileId.substring(0, 8)} (${reason}) → ${res.status} (accepted=${payload?.accepted ?? 'unknown'})`);
     })
         .catch((err) => {
+        lastRequestAt.delete(profileId);
         logger.warn(`[SessionRemint] could not reach Electron to re-mint ${profileId.substring(0, 8)}: ${err instanceof Error ? err.message : String(err)}`);
     });
 }
+

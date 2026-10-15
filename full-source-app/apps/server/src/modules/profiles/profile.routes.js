@@ -403,25 +403,40 @@ export async function registerProfileRoutes(app) {
             if (activeProfiles.length === 0) {
                 return reply.send({ success: true, results: [], message: 'No active profiles' });
             }
+            const { getProfileCookiesCompat } = await import('../../utils/profileCookies.js');
             const results = [];
             for (const profile of activeProfiles) {
-                const cookies = profile.cookies;
-                if (!cookies) {
-                    results.push({ profileId: profile.id, profileName: profile.name, success: false, error: 'No cookies' });
+                const { cookies, hasCookies } = await getProfileCookiesCompat(profile);
+                if (!hasCookies || !cookies) {
+                    results.push({ profileId: profile.id, profileName: profile.name, success: false, noCookies: true, error: 'No cookies' });
                     continue;
                 }
                 try {
                     // refreshAccessTokenFromCookies returns the REAL auth/session expiry
                     // (same helper as /api/profiles/:id/test) instead of a +55min guess.
                     const refreshed = await refreshAccessTokenFromCookies(cookies, profile.id, { force: true });
+                    const expiresAt = refreshed.expiresAt ?? new Date(Date.now() + 55 * 60 * 1000);
                     await profileService.update(profile.id, {
                         accessToken: refreshed.accessToken,
-                        accessTokenExpires: refreshed.expiresAt ?? new Date(Date.now() + 55 * 60 * 1000),
+                        accessTokenExpires: expiresAt,
                     });
-                    results.push({ profileId: profile.id, profileName: profile.name, success: true });
+                    results.push({
+                        profileId: profile.id,
+                        profileName: profile.name,
+                        success: true,
+                        expiresAt: expiresAt.toISOString(),
+                    });
                 }
                 catch (err) {
-                    results.push({ profileId: profile.id, profileName: profile.name, success: false, error: err?.message ?? String(err) });
+                    const needsRelogin = err?.code === 'FLOW_SESSION_REMINT_REQUIRED';
+                    results.push({
+                        profileId: profile.id,
+                        profileName: profile.name,
+                        success: false,
+                        needsRelogin,
+                        errorCode: err?.code ?? null,
+                        error: err?.message ?? String(err),
+                    });
                 }
             }
             const failedProfiles = results.filter(r => !r.success);
